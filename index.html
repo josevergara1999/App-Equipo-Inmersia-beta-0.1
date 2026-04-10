@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>INMERSIA - Content Management Platform</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0a0a12;--bg2:#12121f;--bg3:#1a1a2e;--bg4:#252542;--border:#2a2a4a;--border2:#3a3a5a;--tx:#e8e6f0;--tx2:#8886a0;--tx3:#5a587a;--accent:#c9a0ff;--accent2:#9d6bff;--accent3:#7c3aed;--gold:#f0c040;--gold2:#d4a020;--danger:#ff6b6b;--success:#4ecdc4;--warn:#ffd93d;--info:#6bcbff;--r:12px}
+body{background:var(--bg);color:var(--tx);font-family:'Outfit',sans-serif;overflow:hidden;height:100vh}
+::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:var(--bg2)}::-webkit-scrollbar-thumb{background:var(--bg4);border-radius:3px}
+input,textarea,select{background:var(--bg3);border:1px solid var(--border);color:var(--tx);padding:10px 14px;border-radius:var(--r);font-family:inherit;font-size:13px;outline:none;transition:border .2s;width:100%}
+input:focus,textarea:focus,select:focus{border-color:var(--accent2);box-shadow:0 0 0 3px rgba(157,107,255,.1)}
+button{cursor:pointer;border:none;font-family:inherit;border-radius:var(--r);transition:all .15s}
+@keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+@keyframes slideUp{from{opacity:0;transform:translateY(25px)}to{opacity:1;transform:translateY(0)}}
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+@keyframes rec{0%,100%{box-shadow:0 0 0 0 rgba(255,68,68,.4)}50%{box-shadow:0 0 0 12px rgba(255,68,68,0)}}
+.fi{animation:fadeIn .35s ease}.su{animation:slideUp .4s ease}
+.cd{background:var(--bg2);border:1px solid var(--border);border-radius:14px;overflow:hidden;transition:border-color .2s,box-shadow .2s}
+.cd:hover{border-color:var(--border2);box-shadow:0 0 20px rgba(157,107,255,.06)}
+select option{background:var(--bg3);color:var(--tx)}
+.ep{cursor:grab;padding:6px 9px;margin-bottom:4px;border-radius:8px;font-size:10px;background:var(--bg3);transition:transform .15s;border-left:3px solid var(--accent)}
+.ep:hover{transform:translateX(3px);background:var(--bg4)}
+.tb{background:linear-gradient(135deg,rgba(240,192,64,.08),rgba(240,192,64,.02));border:1px solid rgba(240,192,64,.25);border-radius:12px;padding:14px 16px}
+.rd{width:12px;height:12px;border-radius:50%;background:#ff4444;animation:rec 1.5s infinite}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const{useState,useEffect,useCallback,useMemo,useRef}=React;
+
+// ═══ API CLIENT — all calls go through backend ═════════════════
+const API={
+  async generate(prompt,temperature=0.7){
+    const r=await fetch("/api/ai/generate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({prompt,temperature})});
+    const d=await r.json();if(d.error)throw new Error(d.error);return d.text;
+  },
+  async transcribe(audioBlob){
+    const fd=new FormData();fd.append("audio",audioBlob,"audio.webm");
+    const r=await fetch("/api/transcribe",{method:"POST",body:fd});
+    const d=await r.json();if(d.error)throw new Error(d.error);return d.transcript;
+  },
+  async generateActa(audioBlob,company,participants){
+    const fd=new FormData();
+    if(audioBlob)fd.append("audio",audioBlob,"audio.webm");
+    fd.append("company",company);fd.append("participants",participants);
+    const r=await fetch("/api/generate-acta",{method:"POST",body:fd});
+    const d=await r.json();if(d.error)throw new Error(d.error);return d;
+  },
+  async loyaltyPush(company,topic){
+    const r=await fetch("/api/loyalty/generate-push",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({company,topic})});
+    const d=await r.json();if(d.error)throw new Error(d.error);return d.text;
+  },
+  async metaAdvisor(company,campaigns,totalBudget,question){
+    const r=await fetch("/api/meta/advisor",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({company,campaigns,totalBudget,question})});
+    const d=await r.json();if(d.error)throw new Error(d.error);return d.text;
+  },
+  async health(){const r=await fetch("/api/health");return r.json();},
+};
+
+// ═══ CONFIG ═════════════════════════════════════════════════════
+const INIT_USERS=[
+  {id:1,name:"Conti",email:"conti@inmersia.cl",role:"editor",avatar:"CO",color:"#9d6bff",pass:"1234"},
+  {id:2,name:"Cleme",email:"cleme@inmersia.cl",role:"admin",avatar:"CL",color:"#4ecdc4",pass:"1234"},
+  {id:3,name:"Tiago",email:"tiago@inmersia.cl",role:"editor",avatar:"TI",color:"#ff6b6b",pass:"1234"},
+  {id:4,name:"Gali",email:"gali@inmersia.cl",role:"visualizador",avatar:"GA",color:"#ffd93d",pass:"1234"},
+  {id:5,name:"Javi",email:"javi@inmersia.cl",role:"admin",avatar:"JA",color:"#6bcbff",pass:"1234"},
+  {id:6,name:"Jose",email:"jose@inmersia.cl",role:"admin",avatar:"JO",color:"#ff9ff3",pass:"1234"},
+];
+
+const PLANS={
+  pro_emprende:{name:"Pro Emprende",price:250000,color:"#4ecdc4",tasks:{post:4,historia:6,reel:2,video_pro:1,visita:4}},
+  society:{name:"Society",price:350000,color:"#ff6b6b",tasks:{post:4,historia:6,reel:2,video_pro:2,visita:4}},
+  basic:{name:"Basic",price:495000,color:"#6bcbff",tasks:{post:8,historia:8,reel:2,video_pro:1,visita:1}},
+  medium:{name:"Medium",price:690000,color:"#9d6bff",tasks:{post:12,historia:12,reel:2,video_pro:2,visita:2}},
+  full:{name:"Full",price:930000,color:"#ff9ff3",tasks:{post:16,historia:16,reel:2,video_pro:3,visita:2}},
+};
+
+const EXTRAS=[
+  {id:"video_adicional",name:"Video adicional",price:120000,icon:"🎥",unit:"unidad",color:"#ff9ff3"},
+  {id:"pack_reels",name:"Pack 2 Reels",price:60000,icon:"🎬",unit:"pack",color:"#ff6b6b"},
+  {id:"imagen_adicional",name:"Imagen adicional",price:8000,icon:"🖼️",unit:"unidad",color:"#6bcbff"},
+  {id:"historia_adicional",name:"Historia adicional",price:5000,icon:"📱",unit:"unidad",color:"#4ecdc4"},
+  {id:"tarjeta_fidelizacion",name:"Tarjeta fidelizacion",price:90000,icon:"💳",unit:"unico",color:"#ffd93d"},
+  {id:"rebranding",name:"Rebranding",price:450000,icon:"🎨",unit:"unico",color:"#c9a0ff"},
+  {id:"meta_ads",name:"Meta Ads",price:90000,icon:"📣",unit:"campana",color:"#9d6bff"},
+  {id:"meta_premium",name:"Meta Premium",price:150000,icon:"🚀",unit:"campana",color:"#ff6bff"},
+  {id:"community",name:"Community Mgmt",price:80000,icon:"💬",unit:"mes",color:"#4ecdc4"},
+  {id:"sesion_foto",name:"Sesion foto",price:180000,icon:"📷",unit:"sesion",color:"#ffd93d"},
+  {id:"landing",name:"Landing Page",price:250000,icon:"🌐",unit:"unico",color:"#6bcbff"},
+  {id:"repost",name:"Repost",price:0,icon:"🔄",unit:"∞",color:"#8886a0"},
+];
+
+const TT={post:{l:"Post",c:"#9d6bff",i:"📸"},historia:{l:"Historia",c:"#4ecdc4",i:"📱"},reel:{l:"Reel",c:"#ff6b6b",i:"🎬"},video_pro:{l:"Video Pro",c:"#ff9ff3",i:"🎥"},visita:{l:"Visita",c:"#ffd93d",i:"📍"},custom:{l:"Custom",c:"#c9a0ff",i:"⭐"},repost:{l:"Repost",c:"#8886a0",i:"🔄"}};
+const SS={no_realizado:{l:"No realizado",c:"#8886a0",b:"#1a1a2e"},en_proceso:{l:"En proceso",c:"#ffd93d",b:"#2a2520"},en_aprobacion:{l:"En aprobacion",c:"#ff6b6b",b:"#2a1a1a"},aprobado:{l:"Aprobado",c:"#4ecdc4",b:"#1a2a28"},publicado:{l:"Publicado",c:"#6bcbff",b:"#1a2030"}};
+const MO=["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+const WD=["L","M","X","J","V","S","D"];
+let _i=200;const ni=()=>++_i;const fP=n=>"$"+n.toLocaleString("es-CL");
+const GC_ID="963118662211-v89qggrk0em0l15eqa0omfek9rbgqbcb.apps.googleusercontent.com";
+const td=()=>new Date().toISOString().split("T")[0];
+const tm=()=>{const d=new Date();d.setDate(d.getDate()+1);return d.toISOString().split("T")[0];};
+
+// ═══ UI Components ══════════════════════════════════════════════
+function Bg({color:cl,bg:b,children,style:s}){return<span style={{display:"inline-flex",alignItems:"center",gap:4,padding:"3px 10px",borderRadius:20,fontSize:11,fontWeight:600,color:cl||"#fff",background:b||"var(--bg4)",whiteSpace:"nowrap",...s}}>{children}</span>}
+function Av({u,sz=28}){return<div title={u?.name} style={{width:sz,height:sz,borderRadius:"50%",background:"linear-gradient(135deg,"+(u?.color||"#666")+","+(u?.color||"#666")+"88)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:sz*.34,fontWeight:700,color:"#fff",flexShrink:0}}>{u?.avatar||"?"}</div>}
+function Bt({children,v="p",onClick:oc,style:s,disabled:d}){const vs={p:{background:"linear-gradient(135deg,var(--accent3),var(--accent2))",color:"#fff",padding:"9px 18px",fontSize:13,fontWeight:600},s:{background:"var(--bg4)",color:"var(--tx)",padding:"8px 14px",fontSize:12},g:{background:"transparent",color:"var(--tx2)",padding:"5px 8px",fontSize:12},d:{background:"linear-gradient(135deg,#ff4444,#ff6b6b)",color:"#fff",padding:"8px 14px",fontSize:12,fontWeight:600},go:{background:"linear-gradient(135deg,var(--gold2),var(--gold))",color:"#000",padding:"9px 18px",fontSize:13,fontWeight:700}};return<button disabled={d} onClick={oc} style={{opacity:d?.4:1,...vs[v],...s}}>{children}</button>}
+function Md({open:o,onClose:oc,title:t,children:ch,width:w}){if(!o)return null;return(<div onClick={oc} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",backdropFilter:"blur(4px)"}}><div className="su" onClick={e=>e.stopPropagation()} style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:16,width:w||560,maxWidth:"95vw",maxHeight:"90vh",overflow:"auto"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px",borderBottom:"1px solid var(--border)"}}><h3 style={{fontSize:14,fontWeight:700,margin:0}}>{t}</h3><button onClick={oc} style={{background:"var(--bg4)",color:"var(--tx2)",fontSize:13,width:26,height:26,borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button></div><div style={{padding:16}}>{ch}</div></div></div>)}
+function Fd({label:l,children:ch}){return<div style={{marginBottom:12}}><label style={{fontSize:10,color:"var(--tx2)",textTransform:"uppercase",letterSpacing:1,display:"block",marginBottom:4,fontWeight:600}}>{l}</label>{ch}</div>}
+
+// ═══ LOGIN ══════════════════════════════════════════════════════
+function Login({users:us,onLogin:ol}){
+  const[e,sE]=useState("");const[p,sP]=useState("");const[er,sEr]=useState("");
+  const go=()=>{const u=us.find(u=>u.email===e&&u.pass===p);u?ol(u):sEr("Credenciales incorrectas");};
+  return(<div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"var(--bg)"}}>
+    <div className="su" style={{width:420,padding:34,background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:20,position:"relative"}}>
+      <div style={{position:"absolute",top:0,left:"50%",transform:"translateX(-50%)",width:"60%",height:2,background:"linear-gradient(90deg,transparent,var(--accent2),transparent)"}}/>
+      <div style={{textAlign:"center",marginBottom:26}}>
+        <div style={{display:"inline-flex",padding:"5px 14px",borderRadius:20,background:"var(--bg4)",fontSize:9,fontWeight:600,color:"var(--accent)",letterSpacing:2,marginBottom:12}}>CONTENT MANAGEMENT</div>
+        <h1 style={{fontSize:34,fontWeight:900,background:"linear-gradient(135deg,var(--accent),var(--gold))",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",letterSpacing:3}}>INMERSIA</h1>
+      </div>
+      {er&&<div style={{background:"rgba(255,107,107,.1)",borderRadius:8,padding:"8px 12px",marginBottom:12,fontSize:11,color:"var(--danger)"}}>{er}</div>}
+      <Fd label="Email"><input type="email" value={e} onChange={x=>{sE(x.target.value);sEr("")}} placeholder="tu@inmersia.cl" onKeyDown={x=>x.key==="Enter"&&go()}/></Fd>
+      <Fd label="Contrasena"><input type="password" value={p} onChange={x=>{sP(x.target.value);sEr("")}} placeholder="****" onKeyDown={x=>x.key==="Enter"&&go()}/></Fd>
+      <Bt v="p" onClick={go} style={{width:"100%",padding:11,fontSize:14}}>Iniciar sesion</Bt>
+    </div>
+  </div>);
+}
+
+// ═══ MAIN APP ═══════════════════════════════════════════════════
+function Main({user:iu,users:initU,onLogout:ol,setUsers:sGU}){
+  const[users,sU]=useState(initU);
+  const cu=users.find(u=>u.id===iu.id)||iu;
+  const isA=cu.role==="admin";
+  const[pg,sPg]=useState("dashboard");
+  const[cos,sCos]=useState([{id:1,name:"Fauna",plan:"society",color:"#4ecdc4",hasMeta:false,hasLoyalty:true},{id:2,name:"Huemul",plan:"basic",color:"#9d6bff",hasMeta:false,hasLoyalty:true},{id:3,name:"Antue",plan:"pro_emprende",color:"#ff6b6b",hasMeta:false,hasLoyalty:false}]);
+  const[tasks,sT]=useState([]);const[extras,sEx]=useState([]);
+  const[modal,sMd2]=useState(null);const[newCo,sNC]=useState(false);const[editCo,sEC]=useState(null);
+  const[cM,sCM]=useState(new Date().getMonth());const[cY,sCY]=useState(new Date().getFullYear());
+  const[aiIn,sAI]=useState("");const[aiMs,sAM]=useState([]);const[aiL,sAL]=useState(false);
+  const[drag,sDr]=useState(null);const[fCo,sFCo]=useState("all");
+  const[notifs,sNo]=useState([]);const[shNo,sShNo]=useState(false);
+  const[shBill,sShBill]=useState(false);const[newTk,sNTk]=useState(false);
+  // GCal
+  const[gcalTokens,sGCT]=useState(JSON.parse(localStorage.getItem("inm_gcal_tokens")||"{}"));
+  const myGcal=gcalTokens[cu.id]||"";const[shGcal,sShGcal]=useState(false);
+  // Loyalty
+  const[loyDb,sLoyDb]=useState({});
+  // Meta
+  const[camps,sCamps]=useState([]);
+  // Meetings
+  const[meets,sMeets]=useState([]);const[recing,sRecing]=useState(false);const[mRec,sMRec]=useState(null);const[mCo,sMCo]=useState("");
+  // Billing
+  const[billRcpts,sBR]=useState({});const[billSearch,sBSr]=useState("");
+  // Team payments
+  const[teamPay,sTP]=useState({});
+  // Backend status
+  const[apiStatus,sApiStatus]=useState({gemini:false,whisper:false});
+  const aiRef=useRef(null);
+
+  // Check backend health on mount
+  useEffect(()=>{API.health().then(d=>sApiStatus({gemini:d.gemini,whisper:d.whisper})).catch(()=>{});},[]);
+
+  const genTasks=useCallback(co=>{const p=PLANS[co.plan];if(!p)return[];const o=[];
+    Object.entries(p.tasks).forEach(([t,c])=>{for(let i=1;i<=c;i++)o.push({id:ni(),title:(TT[t]?.l||t)+" "+i+" "+co.name,company:co.name,companyId:co.id,type:t,description:"",responsable:null,date:null,state:"no_realizado",comments:[],votes:{},files:[]});});return o;},[]);
+  useEffect(()=>{if(tasks.length===0)sT(cos.flatMap(c=>genTasks(c)));},[]);
+
+  const addN=(msg,targetUser)=>sNo(p=>[{id:Date.now(),msg,for:targetUser||null},...p].slice(0,30));
+  const myNotifs=useMemo(()=>notifs.filter(n=>!n.for||n.for===cu.id),[notifs,cu]);
+  const upT=(id,u)=>sT(p=>p.map(t=>t.id!==id?t:{...t,...u,...(u.state==="en_aprobacion"&&t.state!=="en_aprobacion"?{votes:{}}:{})}));
+  const delT=id=>sT(p=>p.filter(t=>t.id!==id));
+  const vote=(tid,uid,ok)=>sT(p=>p.map(t=>{if(t.id!==tid)return t;const v={...t.votes,[uid]:ok};const rej=Object.values(v).some(x=>!x);const all=users.every(u=>v[u.id]!==undefined);let ns=t.state;if(rej)ns="en_proceso";else if(all)ns="aprobado";return{...t,votes:v,state:ns};}));
+  const addEx=(exId,date,coId)=>{const ex=EXTRAS.find(e=>e.id===exId);const co=cos.find(c=>c.id===coId);if(!ex)return;sEx(p=>[...p,{id:ni(),extraId:exId,companyId:coId,company:co?.name||"",date,name:ex.name,price:ex.price,icon:ex.icon,color:ex.color}]);if(ex.price>0)addN("Extra: "+ex.name+" "+fP(ex.price));};
+  const remEx=id=>sEx(p=>p.filter(e=>e.id!==id));
+  const mBill=useMemo(()=>{const pfx=cY+"-"+String(cM+1).padStart(2,"0");const mE=extras.filter(e=>e.date?.startsWith(pfx));const by={};cos.forEach(c=>{const ce=mE.filter(e=>e.companyId===c.id);const pp=PLANS[c.plan]?.price||0;const et=ce.reduce((s,e)=>s+e.price,0);by[c.id]={company:c,planPrice:pp,extras:ce,extrasTotal:et,total:pp+et};});return by;},[extras,cos,cM,cY]);
+  const totEx=useMemo(()=>Object.values(mBill).reduce((s,b)=>s+b.extrasTotal,0),[mBill]);
+  const stats=useMemo(()=>{const t=td();return{total:tasks.length,atr:tasks.filter(x=>x.date&&x.date<t&&!["aprobado","publicado"].includes(x.state)).length,apr:tasks.filter(x=>x.state==="en_aprobacion").length,hoy:tasks.filter(x=>x.date===t).length,pen:tasks.filter(x=>!x.date).length,byU:users.map(u=>({...u,tot:tasks.filter(x=>x.responsable===u.id).length,done:tasks.filter(x=>x.responsable===u.id&&["aprobado","publicado"].includes(x.state)).length}))};},[tasks,users]);
+  const myTd=useMemo(()=>tasks.filter(t=>t.date===td()&&t.responsable===cu.id),[tasks,cu]);
+  const myTm=useMemo(()=>tasks.filter(t=>t.date===tm()&&t.responsable===cu.id),[tasks,cu]);
+  const fT=useMemo(()=>fCo==="all"?tasks:tasks.filter(t=>t.companyId===parseInt(fCo)),[tasks,fCo]);
+  const pend=useMemo(()=>fT.filter(t=>!t.date),[fT]);const sched=useMemo(()=>fT.filter(t=>t.date),[fT]);
+  const dIM=(y,m)=>new Date(y,m+1,0).getDate();const fDay=(y,m)=>{const d=new Date(y,m,1).getDay();return d===0?6:d-1;};
+  const calC=useMemo(()=>{const f=fDay(cY,cM),d=dIM(cY,cM),c=[];for(let i=0;i<f;i++)c.push(null);for(let i=1;i<=d;i++)c.push(i);return c;},[cM,cY]);
+  const dTk=day=>{if(!day)return[];const ds=cY+"-"+String(cM+1).padStart(2,"0")+"-"+String(day).padStart(2,"0");return sched.filter(t=>t.date===ds);};
+  const dEx=day=>{if(!day)return[];const ds=cY+"-"+String(cM+1).padStart(2,"0")+"-"+String(day).padStart(2,"0");return extras.filter(e=>e.date===ds&&(fCo==="all"||e.companyId===parseInt(fCo)));};
+  const autoD=()=>{const pe=tasks.filter(t=>!t.date);if(!pe.length)return;const wd=[];for(let d=1;d<=dIM(cY,cM);d++){const dow=new Date(cY,cM,d).getDay();if(dow!==0&&dow!==6)wd.push(d);}const eds=users.filter(u=>u.role!=="visualizador");const up=[...tasks];let di=0,ei=0;pe.forEach(pt=>{const idx=up.findIndex(t=>t.id===pt.id);if(idx===-1)return;up[idx]={...up[idx],date:cY+"-"+String(cM+1).padStart(2,"0")+"-"+String(wd[di%wd.length]).padStart(2,"0"),responsable:up[idx].responsable||eds[ei%eds.length].id};di++;ei++;});sT(up);addN(pe.length+" tareas distribuidas");};
+  const hDrop=day=>{if(!drag||!day)return;const ds=cY+"-"+String(cM+1).padStart(2,"0")+"-"+String(day).padStart(2,"0");if(drag.tp==="task")upT(drag.id,{date:ds});else if(drag.tp==="extra"){const coId=fCo!=="all"?parseInt(fCo):cos[0]?.id;if(coId)addEx(drag.exId,ds,coId);}else if(drag.tp==="repost"){const coId=fCo!=="all"?parseInt(fCo):cos[0]?.id;const co=cos.find(c=>c.id===coId);sT(p=>[...p,{id:ni(),title:"Repost "+(co?.name||""),company:co?.name||"",companyId:coId||0,type:"repost",description:"",responsable:null,date:ds,state:"no_realizado",comments:[],votes:{},files:[]}]);}sDr(null);};
+  const hDropP=()=>{if(drag?.tp==="task"){upT(drag.id,{date:null});sDr(null);}};
+  const updCoP=(coId,np)=>{sCos(p=>p.map(c=>c.id===coId?{...c,plan:np}:c));const co=cos.find(c=>c.id===coId);if(co){sT(p=>{const keep=p.filter(t=>t.companyId!==coId||t.state!=="no_realizado"||t.date);return[...keep,...genTasks({...co,plan:np})];});}};
+  const delCo=coId=>{sCos(p=>p.filter(c=>c.id!==coId));sT(p=>p.filter(t=>t.companyId!==coId));};
+  const toggleFt=(coId,ft)=>sCos(p=>p.map(c=>c.id===coId?{...c,[ft]:!c[ft]}:c));
+  const chRole=(uid,r)=>{sU(p=>p.map(u=>u.id===uid?{...u,role:r}:u));};
+
+  // GCal OAuth
+  const gcalAuth=()=>{const redir=window.location.origin+window.location.pathname;window.location.href=`https://accounts.google.com/o/oauth2/v2/auth?client_id=${GC_ID}&redirect_uri=${encodeURIComponent(redir)}&response_type=token&scope=https://www.googleapis.com/auth/calendar.events&prompt=consent`;};
+  useEffect(()=>{const h=window.location.hash;if(h.includes("access_token")){const tk=h.split("access_token=")[1]?.split("&")[0];if(tk){const nw={...gcalTokens,[cu.id]:tk};sGCT(nw);localStorage.setItem("inm_gcal_tokens",JSON.stringify(nw));window.location.hash="";addN("Google Calendar conectado!");}}},[]);
+  const syncAllGCal=async task=>{const tks=Object.entries(gcalTokens).filter(([,v])=>v);if(!tks.length)return;const ev={summary:task.title,description:task.company,start:{date:task.date},end:{date:task.date}};let ok=0;for(const[,tk]of tks){try{await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+tk},body:JSON.stringify(ev)});ok++;}catch{}}addN("GCal sync: "+ok+" calendario(s)");};
+
+  // ─── CUMBRE AI — via backend ──────────────────────────────────
+  const hAI=async()=>{if(!aiIn.trim())return;const msg=aiIn.trim();sAM(p=>[...p,{r:"u",t:msg}]);sAI("");sAL(true);
+    const sys=`Eres CUMBRE AI de INMERSIA. Empresas: ${cos.map(c=>c.name+" ("+c.plan+")").join(", ")}. Usuarios: ${users.map(u=>u.name).join(", ")}. Tipos: post,historia,reel,video_pro,visita,custom,repost. Si piden CREAR tareas: {"action":"create_tasks","tasks":[{"title":"...","type":"post","company":"Fauna","responsable":"Tiago","date":"2026-04-10"}]}. Hoy: ${td()}.`;
+    try{const txt=await API.generate(sys+"\nUsuario: "+msg);
+      try{const c=txt.replace(/```json\n?/g,"").replace(/```/g,"").trim();const p=JSON.parse(c);
+        if(p.action==="create_tasks"&&p.tasks){const nw=p.tasks.map(t=>{const co=cos.find(c2=>c2.name.toLowerCase()===t.company?.toLowerCase());const rp=users.find(u=>u.name.toLowerCase()===t.responsable?.toLowerCase());return{id:ni(),title:t.title||"Tarea",company:co?.name||"",companyId:co?.id||0,type:t.type||"custom",description:"",responsable:rp?.id||null,date:t.date||null,state:"no_realizado",comments:[],votes:{},files:[]};});
+          sT(p2=>[...p2,...nw]);sAM(p2=>[...p2,{r:"a",t:"Cree "+nw.length+" tarea(s)"}]);}else throw 0;}
+      catch{sAM(p2=>[...p2,{r:"a",t:txt}]);}
+    }catch(e){sAM(p2=>[...p2,{r:"a",t:"Error: "+e.message}]);}
+    sAL(false);};
+
+  // ─── MEETINGS — via backend ───────────────────────────────────
+  const startRec=async()=>{try{const stream=await navigator.mediaDevices.getUserMedia({audio:true});const mr=new MediaRecorder(stream);const chunks=[];
+    mr.ondataavailable=e=>chunks.push(e.data);
+    mr.onstop=async()=>{const blob=new Blob(chunks,{type:"audio/webm"});const url=URL.createObjectURL(blob);sRecing(false);addN("Procesando con Whisper + CUMBRE AI...");
+      try{const result=await API.generateActa(blob,mCo||"General",users.map(u=>u.name).join(", "));
+        sMeets(p=>[{id:ni(),date:td(),company:mCo||"General",acta:result.acta,transcript:result.transcript,audioUrl:url},...p]);
+        if(result.tasks?.length){const nw=result.tasks.map(t=>{const rp=users.find(u=>u.name.toLowerCase().includes(t.responsable?.toLowerCase()||""));return{id:ni(),title:t.title,company:mCo||"General",companyId:0,type:"custom",description:"Reunion "+td(),responsable:rp?.id||null,date:null,state:"no_realizado",comments:[],votes:{},files:[]};});
+          sT(p2=>[...p2,...nw]);addN(nw.length+" tareas desde reunion");}
+      }catch(e){addN("Error: "+e.message);}};
+    mr.start();sMRec(mr);sRecing(true);}catch(e){addN("Error mic: "+e.message);}};
+  const stopRec=()=>{if(mRec){mRec.stop();mRec.stream.getTracks().forEach(t=>t.stop());}};
+  const hFile=(tid,file)=>{const r=new FileReader();r.onload=e=>{upT(tid,{files:[...(tasks.find(t=>t.id===tid)?.files||[]),{name:file.name,data:e.target.result,type:file.type}]});};r.readAsDataURL(file);};
+
+  const allP={dashboard:["Dashboard","📊",true],calendar:["Calendario","📅",true],companies:["Empresas","🏢",isA],tasks:["Tareas","✅",true],team:["Equipo","👥",true],ai:["Cumbre AI","⛰",true],loyalty:["Fidelizacion","💳",true],meta:["Meta Ads","📣",true],meetings:["Reuniones","🎙️",true],payments:["Pagos","💰",isA]};
+  const visP=Object.fromEntries(Object.entries(allP).filter(([,v])=>v[2]));
+
+  return(
+    <div style={{display:"flex",height:"100vh",background:"var(--bg)"}}>
+      <nav style={{width:190,background:"var(--bg2)",borderRight:"1px solid var(--border)",display:"flex",flexDirection:"column",flexShrink:0,overflow:"hidden"}}>
+        <div style={{padding:"12px 12px",borderBottom:"1px solid var(--border)"}}>
+          <div style={{fontSize:8,color:"var(--accent)",fontWeight:600,letterSpacing:2}}>PLATFORM</div>
+          <div style={{fontSize:17,fontWeight:900,background:"linear-gradient(135deg,var(--accent),var(--gold))",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",letterSpacing:3}}>INMERSIA</div>
+        </div>
+        <div style={{flex:1,padding:"4px 4px",display:"flex",flexDirection:"column",gap:1,overflow:"auto"}}>
+          {Object.entries(visP).map(([k,[l,ic]])=>(<button key={k} onClick={()=>sPg(k)} style={{background:pg===k?"linear-gradient(135deg,var(--accent3),var(--accent2))":"transparent",color:pg===k?"#fff":"var(--tx2)",display:"flex",alignItems:"center",gap:7,padding:"7px 9px",borderRadius:8,fontSize:11,fontWeight:pg===k?600:400,textAlign:"left",fontFamily:"inherit"}}><span style={{fontSize:12}}>{ic}</span>{l}</button>))}
+          <div style={{height:1,background:"var(--border)",margin:"3px"}}/>
+          <button onClick={myGcal?()=>sShGcal(true):gcalAuth} style={{background:myGcal?"rgba(78,205,196,.08)":"transparent",color:myGcal?"var(--success)":"var(--tx2)",display:"flex",alignItems:"center",gap:7,padding:"7px 9px",borderRadius:8,fontSize:11,textAlign:"left",fontFamily:"inherit"}}><span>📅</span>{myGcal?"GCal ✓":"Conectar GCal"}</button>
+          {isA&&<button onClick={()=>sShBill(true)} style={{background:"transparent",color:"var(--gold)",display:"flex",alignItems:"center",gap:7,padding:"7px 9px",borderRadius:8,fontSize:11,textAlign:"left",fontFamily:"inherit",fontWeight:600}}><span>💰</span>Facturacion</button>}
+          {/* API Status indicator */}
+          <div style={{padding:"6px 9px",fontSize:9,color:"var(--tx3)"}}>
+            <div>⛰ Gemini: {apiStatus.gemini?<span style={{color:"var(--success)"}}>✓</span>:<span style={{color:"var(--danger)"}}>✗</span>}</div>
+            <div>🎙 Whisper: {apiStatus.whisper?<span style={{color:"var(--success)"}}>✓</span>:<span style={{color:"var(--danger)"}}>✗</span>}</div>
+          </div>
+        </div>
+        <div style={{padding:8,borderTop:"1px solid var(--border)",display:"flex",alignItems:"center",gap:6}}>
+          <Av u={cu} sz={26}/><div style={{flex:1,minWidth:0}}><div style={{fontSize:10,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{cu.name}</div><div style={{fontSize:8,color:"var(--tx2)"}}>{cu.role}</div></div>
+          <button onClick={ol} style={{background:"var(--bg4)",color:"var(--tx2)",width:22,height:22,borderRadius:6,fontSize:9}}>→</button>
+        </div>
+      </nav>
+
+      <main style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
+        <header style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 16px",borderBottom:"1px solid var(--border)",background:"var(--bg2)"}}>
+          <h1 style={{fontSize:15,fontWeight:700,margin:0}}>{allP[pg]?.[1]} {allP[pg]?.[0]}</h1>
+          <div style={{display:"flex",alignItems:"center",gap:6}}>
+            <select value={fCo} onChange={e=>sFCo(e.target.value)} style={{fontSize:10,padding:"5px 8px",width:"auto"}}><option value="all">Todas</option>{cos.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select>
+            <Bt v="go" onClick={()=>sNTk(true)} style={{padding:"5px 10px",fontSize:10}}>+ Tarea</Bt>
+            <div style={{position:"relative"}}><button onClick={()=>sShNo(!shNo)} style={{background:"var(--bg4)",color:"var(--tx2)",width:30,height:30,borderRadius:8,fontSize:13,position:"relative"}}>🔔{myNotifs.length>0&&<span style={{position:"absolute",top:2,right:2,width:5,height:5,borderRadius:"50%",background:"var(--danger)"}}/>}</button>
+              {shNo&&<div className="fi" style={{position:"absolute",right:0,top:36,width:270,background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:10,zIndex:100,maxHeight:240,overflow:"auto"}}>{myNotifs.length===0?<div style={{padding:12,color:"var(--tx2)",fontSize:10}}>Sin notificaciones</div>:myNotifs.slice(0,15).map(n=><div key={n.id} style={{padding:"6px 10px",borderBottom:"1px solid var(--border)",fontSize:10,color:"var(--tx2)"}}>{n.msg}</div>)}</div>}
+            </div>
+          </div>
+        </header>
+        <div style={{flex:1,overflow:"auto",padding:16}}>
+
+        {/* DASHBOARD */}
+        {pg==="dashboard"&&(<div className="fi">
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+            <div className="cd" style={{padding:12}}><div style={{fontSize:12,fontWeight:700,marginBottom:8,color:"var(--success)"}}>📅 Hoy</div>{myTd.length===0?<div style={{fontSize:10,color:"var(--tx3)"}}>Nada</div>:myTd.map(t=>(<div key={t.id} onClick={()=>sMd2(t)} style={{cursor:"pointer",display:"flex",alignItems:"center",gap:5,padding:"5px 7px",borderRadius:5,marginBottom:2,background:"var(--bg3)",fontSize:10}}><span>{TT[t.type]?.i||"⭐"}</span><span style={{flex:1}}>{t.title}</span><Bg color={SS[t.state]?.c} bg={SS[t.state]?.b} style={{fontSize:8}}>{SS[t.state]?.l}</Bg></div>))}</div>
+            <div className="cd" style={{padding:12}}><div style={{fontSize:12,fontWeight:700,marginBottom:8,color:"var(--info)"}}>📆 Mañana</div>{myTm.length===0?<div style={{fontSize:10,color:"var(--tx3)"}}>Nada</div>:myTm.map(t=>(<div key={t.id} onClick={()=>sMd2(t)} style={{cursor:"pointer",display:"flex",alignItems:"center",gap:5,padding:"5px 7px",borderRadius:5,marginBottom:2,background:"var(--bg3)",fontSize:10}}><span>{TT[t.type]?.i||"⭐"}</span><span style={{flex:1}}>{t.title}</span><Bg color={SS[t.state]?.c} bg={SS[t.state]?.b} style={{fontSize:8}}>{SS[t.state]?.l}</Bg></div>))}</div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:8,marginBottom:14}}>
+            {[["Total",stats.total,"var(--accent2)"],["Pend.",stats.pen,"var(--warn)"],["Aprob.",stats.apr,"var(--danger)"],["Hoy",stats.hoy,"var(--success)"],["Atras.",stats.atr,"#ff4444"]].map(([l,v,c],i)=>(<div key={i} className="cd" style={{padding:12,borderLeft:"3px solid "+c}}><div style={{fontSize:9,color:"var(--tx2)"}}>{l}</div><div style={{fontSize:20,fontWeight:800,fontFamily:"'Space Mono',monospace",color:c}}>{v}</div></div>))}
+          </div>
+          <div className="cd" style={{padding:12}}><div style={{fontSize:12,fontWeight:700,marginBottom:8}}>Productividad</div>{stats.byU.map(u=>(<div key={u.id} style={{display:"flex",alignItems:"center",gap:6,marginBottom:5}}><Av u={u} sz={20}/><span style={{fontSize:10,flex:1}}>{u.name}</span><span style={{fontSize:9,color:"var(--tx2)",fontFamily:"'Space Mono',monospace"}}>{u.done}/{u.tot}</span><div style={{width:50,height:4,background:"var(--bg4)",borderRadius:2,overflow:"hidden"}}><div style={{width:(u.tot?u.done/u.tot*100:0)+"%",height:"100%",background:u.color,borderRadius:2}}/></div></div>))}</div>
+        </div>)}
+
+        {/* CALENDAR */}
+        {pg==="calendar"&&(<div className="fi">
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+            <div style={{display:"flex",alignItems:"center",gap:8}}><Bt v="g" onClick={()=>{if(cM===0){sCM(11);sCY(cY-1)}else sCM(cM-1)}}>&lt;</Bt><span style={{fontSize:13,fontWeight:700,minWidth:130,textAlign:"center",fontFamily:"'Space Mono',monospace"}}>{MO[cM]} {cY}</span><Bt v="g" onClick={()=>{if(cM===11){sCM(0);sCY(cY+1)}else sCM(cM+1)}}>&gt;</Bt></div>
+            <Bt v="go" onClick={autoD} style={{padding:"6px 10px",fontSize:10}}>🤖 Auto</Bt>
+          </div>
+          <div style={{display:"flex",gap:6}}>
+            <div onDragOver={e=>e.preventDefault()} onDrop={hDropP} style={{width:155,flexShrink:0,background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:10,padding:7,maxHeight:"72vh",overflow:"auto"}}>
+              <div style={{fontSize:9,fontWeight:700,color:"var(--tx2)"}}>PENDIENTES ({pend.length})</div>
+              <div draggable onDragStart={()=>sDr({tp:"repost"})} className="ep" style={{borderLeftColor:"#8886a0",background:"var(--bg4)",marginBottom:6,marginTop:4}}><div style={{fontWeight:700,color:"var(--tx2)"}}>🔄 + Repost (∞)</div></div>
+              {pend.slice(0,30).map(t=>(<div key={t.id} draggable onDragStart={()=>sDr({tp:"task",id:t.id})} className="ep" style={{borderLeftColor:TT[t.type]?.c||"var(--accent)"}}><div style={{fontWeight:600}}>{TT[t.type]?.i||"⭐"} {t.title}</div></div>))}
+            </div>
+            <div style={{flex:1}}><div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:1,background:"var(--border)",borderRadius:8,overflow:"hidden"}}>
+              {WD.map(d=><div key={d} style={{background:"var(--bg3)",padding:"4px 0",textAlign:"center",fontSize:9,fontWeight:700,color:"var(--tx2)"}}>{d}</div>)}
+              {calC.map((day,i)=>{const dt2=dTk(day);const de2=dEx(day);const isT=day&&new Date().getDate()===day&&new Date().getMonth()===cM&&new Date().getFullYear()===cY;
+                return(<div key={i} onDragOver={e=>e.preventDefault()} onDrop={()=>hDrop(day)} style={{background:isT?"rgba(157,107,255,.05)":"var(--bg2)",minHeight:64,padding:2,opacity:day?1:.3}}>
+                  {day&&(<><div style={{fontSize:8,fontWeight:isT?800:400,color:isT?"var(--accent)":"var(--tx2)",padding:"1px 3px",borderRadius:4,display:"inline-block"}}>{day}</div>
+                    {dt2.slice(0,3).map(t=>(<div key={t.id} onClick={()=>sMd2(t)} draggable onDragStart={()=>sDr({tp:"task",id:t.id})} style={{cursor:"pointer",padding:"1px 3px",marginBottom:1,borderRadius:3,fontSize:7,background:(TT[t.type]?.c||"#999")+"15",color:TT[t.type]?.c,fontWeight:600,overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis",borderLeft:"2px solid "+(TT[t.type]?.c||"#999")}}>{t.title}</div>))}
+                    {de2.slice(0,2).map(e=>(<div key={e.id} style={{padding:"1px 3px",marginBottom:1,borderRadius:3,fontSize:7,background:"rgba(240,192,64,.08)",color:"var(--gold)",fontWeight:600,overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis",borderLeft:"2px solid var(--gold)",display:"flex",justifyContent:"space-between"}}><span>{e.icon}{e.name.slice(0,10)}</span><button onClick={()=>remEx(e.id)} style={{background:"none",color:"var(--danger)",fontSize:6,padding:0,borderRadius:0}}>x</button></div>))}
+                  </>)}</div>);})}
+            </div></div>
+            {isA&&<div style={{width:165,flexShrink:0,display:"flex",flexDirection:"column",gap:6}}>
+              <div className="tb" style={{padding:8}}><div style={{fontSize:8,fontWeight:700,color:"var(--gold)"}}>EXTRAS</div><div style={{fontSize:16,fontWeight:900,fontFamily:"'Space Mono',monospace",color:"var(--gold)"}}>{fP(totEx)}</div></div>
+              <div style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:10,padding:6,flex:1,maxHeight:"50vh",overflow:"auto"}}>
+                {EXTRAS.filter(e=>e.id!=="repost").map(ex=>(<div key={ex.id} draggable onDragStart={()=>sDr({tp:"extra",exId:ex.id})} className="ep" style={{borderLeftColor:ex.color}}>
+                  <div style={{fontWeight:600,fontSize:8}}>{ex.icon} {ex.name}</div>
+                  <div style={{color:"var(--gold)",fontWeight:700,fontSize:9,fontFamily:"'Space Mono',monospace"}}>{ex.price>0?fP(ex.price):"Free"}</div>
+                </div>))}
+              </div>
+            </div>}
+          </div>
+        </div>)}
+
+        {/* COMPANIES */}
+        {pg==="companies"&&isA&&(<div className="fi">
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:12}}><span style={{fontSize:14,fontWeight:700}}>Empresas</span><Bt v="p" onClick={()=>sNC(true)}>+ Nueva</Bt></div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:12}}>
+            {cos.map(c=>{const pl=PLANS[c.plan];return(<div key={c.id} className="cd"><div style={{height:3,background:c.color}}/><div style={{padding:14}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}><span style={{fontSize:14,fontWeight:800}}>{c.name}</span>
+                <div style={{display:"flex",gap:3}}><button onClick={()=>sEC(c)} style={{background:"var(--bg4)",color:"var(--tx2)",padding:"3px 8px",fontSize:9,borderRadius:6}}>Editar</button><button onClick={()=>{if(confirm("Eliminar "+c.name+"?"))delCo(c.id)}} style={{background:"rgba(255,68,68,.1)",color:"var(--danger)",padding:"3px 8px",fontSize:9,borderRadius:6}}>Eliminar</button></div></div>
+              <Bg color={pl?.color}>{pl?.name} - {fP(pl?.price||0)}/mes</Bg>
+              <div style={{marginTop:8,display:"flex",gap:4,flexWrap:"wrap"}}>{pl&&Object.entries(pl.tasks).map(([tp,cnt])=><Bg key={tp} color={TT[tp]?.c} bg="var(--bg3)" style={{fontSize:8}}>{TT[tp]?.i} {cnt} {TT[tp]?.l}</Bg>)}</div>
+              <div style={{marginTop:10,display:"flex",gap:8}}>
+                <label style={{display:"flex",alignItems:"center",gap:4,cursor:"pointer",fontSize:10,color:c.hasLoyalty?"var(--success)":"var(--tx3)"}}><input type="checkbox" checked={c.hasLoyalty||false} onChange={()=>toggleFt(c.id,"hasLoyalty")} style={{width:14,height:14,padding:0}}/>💳 Fidelizacion</label>
+                <label style={{display:"flex",alignItems:"center",gap:4,cursor:"pointer",fontSize:10,color:c.hasMeta?"var(--accent2)":"var(--tx3)"}}><input type="checkbox" checked={c.hasMeta||false} onChange={()=>toggleFt(c.id,"hasMeta")} style={{width:14,height:14,padding:0}}/>📣 Meta</label>
+              </div>
+            </div></div>);})}
+          </div>
+          <Md open={newCo} onClose={()=>sNC(false)} title="Nueva Empresa"><CoForm onSave={c=>{sCos(p=>[...p,{...c,id:Date.now(),hasLoyalty:false,hasMeta:false}]);sT(p=>[...p,...genTasks(c)]);sNC(false);}}/></Md>
+          <Md open={!!editCo} onClose={()=>sEC(null)} title="Editar Plan">{editCo&&<Fd label="Plan"><select defaultValue={editCo.plan} onChange={e=>{updCoP(editCo.id,e.target.value);sEC(null);}}>{Object.entries(PLANS).map(([k,v])=><option key={k} value={k}>{v.name} - {fP(v.price)}</option>)}</select></Fd>}</Md>
+        </div>)}
+
+        {/* TASKS */}
+        {pg==="tasks"&&(<div className="fi" style={{display:"flex",gap:7,overflowX:"auto",paddingBottom:10}}>
+          {Object.entries(SS).map(([sk,sv])=>{const st=fT.filter(t=>t.state===sk);return(<div key={sk} style={{minWidth:200,width:200,background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:12,flexShrink:0}}>
+            <div style={{padding:"8px 10px",borderBottom:"1px solid var(--border)",display:"flex",alignItems:"center",gap:4}}><div style={{width:7,height:7,borderRadius:"50%",background:sv.c}}/><span style={{fontSize:11,fontWeight:700}}>{sv.l}</span><span style={{fontSize:9,color:"var(--tx2)",marginLeft:"auto"}}>{st.length}</span></div>
+            <div style={{padding:4,maxHeight:"65vh",overflow:"auto"}}>{st.slice(0,25).map(t=>(<div key={t.id} onClick={()=>sMd2(t)} style={{cursor:"pointer",padding:7,marginBottom:3,borderRadius:7,background:"var(--bg3)",borderLeft:"3px solid "+(TT[t.type]?.c||"#999")}}>
+              <div style={{fontSize:10,fontWeight:600}}>{TT[t.type]?.i||"⭐"} {t.title}</div>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginTop:3}}>{t.responsable?<Av u={users.find(u=>u.id===t.responsable)} sz={14}/>:<span style={{fontSize:7,color:"var(--tx3)"}}>--</span>}{t.files?.length>0&&<Bg color="var(--info)" style={{fontSize:7,padding:"1px 4px"}}>📎{t.files.length}</Bg>}</div>
+            </div>))}</div></div>);})}
+        </div>)}
+
+        {/* TEAM */}
+        {pg==="team"&&(<div className="fi" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:10}}>
+          {users.map(u=>{const ut=tasks.filter(t=>t.responsable===u.id);const dn=ut.filter(t=>["aprobado","publicado"].includes(t.state)).length;const myPays=teamPay[u.id]||[];
+            return(<div key={u.id} className="cd" style={{padding:16,textAlign:"center",position:"relative"}}><div style={{position:"absolute",top:0,left:0,right:0,height:3,background:u.color}}/>
+              <Av u={u} sz={44}/><div style={{marginTop:6,fontWeight:800,fontSize:13}}>{u.name}</div>
+              {isA?<select value={u.role} onChange={e=>chRole(u.id,e.target.value)} style={{marginTop:4,fontSize:10,padding:"3px 6px",width:"auto"}}><option value="admin">admin</option><option value="editor">editor</option><option value="visualizador">visualizador</option></select>:<Bg style={{marginTop:4}}>{u.role}</Bg>}
+              <div style={{display:"flex",justifyContent:"center",gap:14,marginTop:8}}>
+                <div><div style={{fontSize:16,fontWeight:800,fontFamily:"'Space Mono',monospace"}}>{ut.length}</div><div style={{fontSize:7,color:"var(--tx3)"}}>Asign.</div></div>
+                <div><div style={{fontSize:16,fontWeight:800,fontFamily:"'Space Mono',monospace",color:"var(--success)"}}>{dn}</div><div style={{fontSize:7,color:"var(--tx3)"}}>OK</div></div>
+              </div>
+              {u.id===cu.id&&myPays.length>0&&<div style={{marginTop:6,borderTop:"1px solid var(--border)",paddingTop:4,textAlign:"left"}}><div style={{fontSize:8,fontWeight:600,color:"var(--gold)"}}>💰 Mis pagos</div>{myPays.slice(0,3).map(p=>(<div key={p.id} style={{fontSize:8,display:"flex",justifyContent:"space-between",color:"var(--tx2)"}}><span>{p.concept||"Pago"}</span><span style={{color:"var(--success)"}}>{fP(p.amount)}</span></div>))}</div>}
+            </div>);})}
+        </div>)}
+
+        {/* CUMBRE AI */}
+        {pg==="ai"&&(<div className="fi" style={{maxWidth:600,margin:"0 auto"}}><div className="cd" style={{padding:14,display:"flex",flexDirection:"column",minHeight:360}}>
+          <div ref={aiRef} style={{flex:1,overflow:"auto",marginBottom:10}}>
+            {aiMs.length===0&&(<div style={{textAlign:"center",padding:20}}><div style={{fontSize:36,marginBottom:6,animation:"float 3s ease infinite"}}>⛰</div><div style={{fontSize:16,fontWeight:900,background:"linear-gradient(135deg,var(--accent),var(--gold))",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>CUMBRE AI</div><div style={{fontSize:11,color:"var(--tx2)",margin:"4px 0 14px"}}>Powered by Gemini</div>
+              {["Crear 3 historias para Fauna asignadas a Tiago","Ideas para restaurante","Caption para reel de promo"].map((ex,i)=>(<button key={i} onClick={()=>sAI(ex)} style={{display:"block",width:"100%",maxWidth:360,margin:"0 auto 3px",background:"var(--bg3)",color:"var(--tx2)",padding:"7px 10px",borderRadius:7,fontSize:10,textAlign:"left",border:"1px solid var(--border)",fontFamily:"inherit"}}>{ex}</button>))}
+            </div>)}
+            {aiMs.map((m,i)=>(<div key={i} style={{display:"flex",justifyContent:m.r==="u"?"flex-end":"flex-start",marginBottom:5}}><div style={{maxWidth:"85%",padding:"8px 12px",borderRadius:10,fontSize:11,lineHeight:1.5,background:m.r==="u"?"linear-gradient(135deg,var(--accent3),var(--accent2))":"var(--bg3)",color:m.r==="u"?"#fff":"var(--tx)",whiteSpace:"pre-wrap"}}>{m.t}</div></div>))}
+            {aiL&&<div style={{display:"flex",gap:4,padding:6}}>{[0,1,2].map(i=><div key={i} style={{width:6,height:6,borderRadius:"50%",background:"var(--accent)",animation:"pulse 1s infinite "+i*.2+"s"}}/>)}</div>}
+          </div>
+          <div style={{display:"flex",gap:5}}><input value={aiIn} onChange={e=>sAI(e.target.value)} onKeyDown={e=>e.key==="Enter"&&!aiL&&hAI()} placeholder="Instruccion..." style={{flex:1,padding:"9px 12px",borderRadius:8}}/><Bt v="p" onClick={hAI} disabled={aiL}>Enviar</Bt></div>
+        </div></div>)}
+
+        {/* LOYALTY */}
+        {pg==="loyalty"&&(<div className="fi"><LoyPg cos={cos} loyDb={loyDb} sLoyDb={sLoyDb} addN={addN}/></div>)}
+
+        {/* META */}
+        {pg==="meta"&&(<div className="fi"><MetPg cos={cos} camps={camps} sCamps={sCamps}/></div>)}
+
+        {/* MEETINGS */}
+        {pg==="meetings"&&(<div className="fi" style={{maxWidth:680,margin:"0 auto"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+            <span style={{fontSize:14,fontWeight:700}}>Reuniones</span>
+            <div style={{display:"flex",gap:6}}>
+              <select value={mCo} onChange={e=>sMCo(e.target.value)} style={{fontSize:10,padding:"5px 8px",width:"auto"}}><option value="">General</option>{cos.map(c=><option key={c.id} value={c.name}>{c.name}</option>)}</select>
+              {!recing?<Bt v="d" onClick={startRec} style={{display:"flex",alignItems:"center",gap:4,padding:"7px 12px",fontSize:11}}>🎙️ Iniciar</Bt>:<Bt v="s" onClick={stopRec} style={{display:"flex",alignItems:"center",gap:4}}><div className="rd"/>Finalizar</Bt>}
+            </div>
+          </div>
+          {recing&&<div className="cd" style={{padding:14,marginBottom:12,textAlign:"center"}}><div className="rd" style={{margin:"0 auto 6px"}}/><div style={{fontSize:13,fontWeight:700,color:"var(--danger)"}}>Grabando...</div><div style={{fontSize:10,color:"var(--tx2)"}}>Whisper + CUMBRE AI procesaran al finalizar</div></div>}
+          {meets.map(m=>(<div key={m.id} className="cd" style={{marginBottom:10}}><div style={{padding:12}}>
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><div><Bg>{m.company}</Bg><span style={{fontSize:10,color:"var(--tx2)",marginLeft:6}}>{m.date}</span></div>{m.audioUrl&&<a href={m.audioUrl} download style={{fontSize:9,color:"var(--accent)"}}>⬇ Audio</a>}</div>
+            {m.transcript&&<details style={{marginBottom:4}}><summary style={{fontSize:10,color:"var(--tx2)",cursor:"pointer"}}>Transcripcion</summary><pre style={{background:"var(--bg3)",padding:6,borderRadius:6,fontSize:9,whiteSpace:"pre-wrap",maxHeight:120,overflow:"auto"}}>{m.transcript}</pre></details>}
+            <pre style={{background:"var(--bg3)",padding:8,borderRadius:8,fontSize:10,lineHeight:1.5,whiteSpace:"pre-wrap",maxHeight:250,overflow:"auto"}}>{m.acta}</pre>
+          </div></div>))}
+          {!meets.length&&!recing&&<div style={{textAlign:"center",padding:30,color:"var(--tx3)"}}>🎙️ Sin reuniones</div>}
+        </div>)}
+
+        {/* PAYMENTS */}
+        {pg==="payments"&&isA&&(<div className="fi" style={{maxWidth:600,margin:"0 auto"}}><TeamPayPg users={users} teamPay={teamPay} sTP={sTP} addN={addN}/></div>)}
+
+        </div>
+      </main>
+
+      {/* MODALS */}
+      <Md open={!!modal} onClose={()=>sMd2(null)} title={modal?.title||"Tarea"} width={560}>
+        {modal&&<TskDet t={modal} cu={cu} users={users} onUp={u=>{upT(modal.id,u);sMd2(m=>({...m,...u}));if(u.date)syncAllGCal({...modal,...u});}} onVote={(uid,ok)=>{vote(modal.id,uid,ok);setTimeout(()=>sT(ts=>{const f=ts.find(x=>x.id===modal.id);if(f)sMd2({...f});return ts;}),50);}} onDel={()=>{delT(modal.id);sMd2(null);}} onUns={()=>{upT(modal.id,{date:null});sMd2(m=>({...m,date:null}));}} onSync={()=>syncAllGCal(modal)} hasGcal={!!myGcal} onFile={f=>hFile(modal.id,f)}/>}
+      </Md>
+      <Md open={newTk} onClose={()=>sNTk(false)} title="Nueva Tarea"><TskForm cos={cos} users={users} onSave={t=>{sT(p=>[...p,{...t,id:ni(),state:"no_realizado",comments:[],votes:{},files:[]}]);sNTk(false);}}/></Md>
+      <Md open={shGcal} onClose={()=>sShGcal(false)} title="Google Calendar" width={400}>
+        <div style={{textAlign:"center",padding:10}}><Bg color="var(--success)">Conectado ✓</Bg>
+          <p style={{fontSize:11,color:"var(--tx2)",margin:"10px 0"}}>Las tareas se sincronizan a todos los calendarios conectados.</p>
+          <Bt v="d" onClick={()=>{const nw={...gcalTokens};delete nw[cu.id];sGCT(nw);localStorage.setItem("inm_gcal_tokens",JSON.stringify(nw));sShGcal(false);}} style={{fontSize:11}}>Desconectar</Bt>
+          <div style={{marginTop:10,padding:6,background:"var(--bg3)",borderRadius:6}}>
+            <div style={{fontSize:9,color:"var(--tx2)"}}>Conectados:</div>
+            {Object.keys(gcalTokens).filter(k=>gcalTokens[k]).map(k=>{const u=users.find(u2=>u2.id===parseInt(k));return u?<Bg key={k} color={u.color} style={{margin:2,fontSize:8}}>{u.name} ✓</Bg>:null;})}
+          </div>
+        </div>
+      </Md>
+      {isA&&<Md open={shBill} onClose={()=>sShBill(false)} title={"Facturacion "+MO[cM]} width={620}>
+        <BillPg cos={cos} plans={PLANS} billing={mBill} month={MO[cM]} year={cY} remEx={remEx} billRcpts={billRcpts} sBR={sBR} cM={cM} cY={cY}/>
+      </Md>}
+    </div>
+  );
+}
+
+// ═══ SUB-PAGES ══════════════════════════════════════════════════
+function LoyPg({cos,loyDb,sLoyDb,addN}){
+  const lCos=cos.filter(c=>c.hasLoyalty);const[sel,sSel]=useState(lCos[0]?.id||0);
+  const[nc,sNc]=useState({name:"",email:"",birthday:""});const[msg,sMsg]=useState("");const[res,sRes]=useState("");const[ld,sLd]=useState(false);
+  const cls=loyDb[sel]||[];
+  const addCl=()=>{if(!nc.name)return;sLoyDb(p=>({...p,[sel]:[...(p[sel]||[]),{...nc,id:ni()}]}));sNc({name:"",email:"",birthday:""});};
+  const genMsg=async()=>{sLd(true);try{const r=await API.loyaltyPush(cos.find(c=>c.id===sel)?.name||"empresa",msg||"promocion");sRes(r);}catch(e){sRes("Error: "+e.message);}sLd(false);};
+  if(!lCos.length)return<div style={{textAlign:"center",padding:30,color:"var(--tx3)"}}>💳 Activa fidelizacion en Empresas</div>;
+  return(<div>
+    <div style={{display:"flex",gap:6,marginBottom:12}}>{lCos.map(c=><button key={c.id} onClick={()=>sSel(c.id)} style={{padding:"6px 14px",borderRadius:7,fontSize:11,fontWeight:sel===c.id?700:400,background:sel===c.id?"linear-gradient(135deg,var(--accent3),var(--accent2))":"var(--bg3)",color:sel===c.id?"#fff":"var(--tx2)",fontFamily:"inherit"}}>{c.name}</button>)}</div>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+      <div className="cd" style={{padding:12}}>
+        <div style={{fontSize:12,fontWeight:700,marginBottom:8}}>Clientes ({cls.length})</div>
+        <div style={{display:"flex",gap:3,marginBottom:6}}><input value={nc.name} onChange={e=>sNc({...nc,name:e.target.value})} placeholder="Nombre" style={{flex:1,fontSize:10,padding:"5px"}}/><input value={nc.email} onChange={e=>sNc({...nc,email:e.target.value})} placeholder="Email" style={{flex:1,fontSize:10,padding:"5px"}}/><input type="date" value={nc.birthday} onChange={e=>sNc({...nc,birthday:e.target.value})} style={{width:95,fontSize:10,padding:"5px"}}/><Bt v="p" onClick={addCl} style={{padding:"3px 8px",fontSize:10}}>+</Bt></div>
+        <div style={{maxHeight:220,overflow:"auto"}}>{cls.map(c=>(<div key={c.id} style={{display:"flex",alignItems:"center",gap:4,padding:"4px 6px",marginBottom:2,borderRadius:4,background:"var(--bg3)",fontSize:10}}><span style={{flex:1}}>{c.name}</span><span style={{color:"var(--tx3)",fontSize:9}}>{c.email}</span><button onClick={()=>sLoyDb(p=>({...p,[sel]:p[sel].filter(x=>x.id!==c.id)}))} style={{background:"none",color:"var(--danger)",fontSize:9,padding:0}}>x</button></div>))}</div>
+      </div>
+      <div className="cd" style={{padding:12}}>
+        <div style={{fontSize:12,fontWeight:700,marginBottom:6}}>⛰ Push notification</div>
+        <Fd label="Tema"><input value={msg} onChange={e=>sMsg(e.target.value)} placeholder="Ej: 2x1 viernes"/></Fd>
+        <Bt v="p" onClick={genMsg} disabled={ld} style={{width:"100%",marginBottom:8}}>{ld?"...":"Generar push + horarios"}</Bt>
+        {res&&<pre style={{background:"var(--bg3)",padding:8,borderRadius:6,fontSize:10,whiteSpace:"pre-wrap",maxHeight:200,overflow:"auto"}}>{res}</pre>}
+      </div>
+    </div>
+  </div>);
+}
+
+function MetPg({cos,camps,sCamps}){
+  const mCos=cos.filter(c=>c.hasMeta);const[sel,sSel]=useState(mCos[0]?.id||0);
+  const[nc,sNc]=useState({name:"",budget:50000,objective:"awareness"});const[q,sQ]=useState("");const[res,sRes]=useState("");const[ld,sLd]=useState(false);
+  const cc=camps.filter(c=>c.companyId===sel);const totB=cc.reduce((s,c)=>s+c.budget,0);
+  const addC=()=>{if(!nc.name)return;sCamps(p=>[...p,{...nc,id:ni(),companyId:sel,company:cos.find(c=>c.id===sel)?.name||"",status:"active",results:{reach:Math.floor(Math.random()*50000),clicks:Math.floor(Math.random()*2000),ctr:(Math.random()*5).toFixed(1)}}]);sNc({name:"",budget:50000,objective:"awareness"});};
+  const ask=async()=>{sLd(true);try{const r=await API.metaAdvisor(cos.find(c=>c.id===sel)?.name||"",cc.length,fP(totB),q);sRes(r);}catch(e){sRes("Error: "+e.message);}sLd(false);};
+  if(!mCos.length)return<div style={{textAlign:"center",padding:30,color:"var(--tx3)"}}>📣 Activa Meta Ads en Empresas</div>;
+  return(<div>
+    <div style={{display:"flex",gap:6,marginBottom:12}}>{mCos.map(c=><button key={c.id} onClick={()=>sSel(c.id)} style={{padding:"6px 14px",borderRadius:7,fontSize:11,fontWeight:sel===c.id?700:400,background:sel===c.id?"linear-gradient(135deg,var(--accent3),var(--accent2))":"var(--bg3)",color:sel===c.id?"#fff":"var(--tx2)",fontFamily:"inherit"}}>{c.name}</button>)}</div>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+      <div>
+        <div className="cd" style={{padding:12,marginBottom:10}}><div style={{fontSize:12,fontWeight:700,marginBottom:8}}>Campanas ({cc.length}) — {fP(totB)}</div>
+          {cc.map(c=>(<div key={c.id} style={{padding:8,marginBottom:4,borderRadius:7,background:"var(--bg3)",borderLeft:"3px solid "+(c.status==="active"?"var(--success)":"var(--tx3)")}}>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:11}}><b>{c.name}</b><button onClick={()=>sCamps(p=>p.filter(x=>x.id!==c.id))} style={{background:"none",color:"var(--danger)",fontSize:9,padding:0}}>X</button></div>
+            <div style={{fontSize:9,color:"var(--tx2)"}}>{fP(c.budget)} | {c.results?.reach?.toLocaleString()} alcance</div>
+            <input type="range" min={10000} max={500000} step={5000} value={c.budget} onChange={e=>sCamps(p=>p.map(x=>x.id===c.id?{...x,budget:parseInt(e.target.value)}:x))} style={{width:"100%",padding:0,border:"none",height:4,marginTop:4}}/></div>))}
+        </div>
+        <div className="cd" style={{padding:12}}><Fd label="Nombre"><input value={nc.name} onChange={e=>sNc({...nc,name:e.target.value})} placeholder="Campana..." style={{fontSize:10}}/></Fd>
+          <Bt v="p" disabled={!nc.name} onClick={addC} style={{width:"100%",fontSize:11}}>Crear</Bt></div>
+      </div>
+      <div className="cd" style={{padding:12}}><div style={{fontSize:12,fontWeight:700,marginBottom:8}}>⛰ Advisor</div>
+        <Fd label="Pregunta"><textarea value={q} onChange={e=>sQ(e.target.value)} rows={2} placeholder="Como optimizar?"/></Fd>
+        <Bt v="p" onClick={ask} disabled={ld} style={{width:"100%",marginBottom:8}}>{ld?"...":"Consultar"}</Bt>
+        {res&&<pre style={{background:"var(--bg3)",padding:8,borderRadius:6,fontSize:10,whiteSpace:"pre-wrap",maxHeight:250,overflow:"auto"}}>{res}</pre>}
+      </div>
+    </div>
+  </div>);
+}
+
+function BillPg({cos,plans,billing,month,year,remEx,billRcpts,sBR,cM,cY}){
+  const hUp=(coId,type,e)=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=ev=>{sBR(p=>({...p,[coId]:[...(p[coId]||[]),{id:ni(),date:td(),img:ev.target.result,type,month:cM,year:cY}]}));};r.readAsDataURL(f);};
+  return(<div>
+    {cos.map(c=>{const b=billing[c.id];const pl=plans[c.plan];const rc=(billRcpts[c.id]||[]).filter(r=>r.month===cM&&r.year===cY);
+      const h1=rc.some(r=>r.type==="50_1");const h2=rc.some(r=>r.type==="50_2");
+      return(<div key={c.id} className="cd" style={{marginBottom:10}}><div style={{height:3,background:c.color}}/><div style={{padding:12}}>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontSize:13,fontWeight:800}}>{c.name}</span><span style={{fontSize:15,fontWeight:900,fontFamily:"'Space Mono',monospace",color:"var(--gold)"}}>{fP(b?.total||0)}</span></div>
+        <div style={{fontSize:10,padding:"4px 8px",background:"var(--bg3)",borderRadius:6,marginBottom:4,display:"flex",justifyContent:"space-between"}}><span>Plan {pl?.name}</span><span>{fP(pl?.price||0)}</span></div>
+        {b?.extras?.map(e=>(<div key={e.id} style={{display:"flex",justifyContent:"space-between",padding:"2px 8px",fontSize:9,background:"rgba(240,192,64,.04)",borderRadius:4,marginBottom:1}}><span>{e.icon} {e.name}</span><div style={{display:"flex",gap:4}}><span style={{color:"var(--gold)"}}>{fP(e.price)}</span><button onClick={()=>remEx(e.id)} style={{background:"none",color:"var(--danger)",fontSize:8,padding:0}}>X</button></div></div>))}
+        <div style={{marginTop:6,display:"grid",gridTemplateColumns:"1fr 1fr",gap:4}}>
+          {[["50_1","1er 50%",h1],["50_2","2do 50%",h2]].map(([tp,lb,has])=>(<div key={tp} style={{padding:6,background:has?"rgba(78,205,196,.06)":"var(--bg3)",borderRadius:6,border:has?"1px solid rgba(78,205,196,.15)":"1px solid var(--border)"}}>
+            <div style={{fontSize:9,fontWeight:600}}>{lb}</div><div style={{fontSize:12,fontWeight:800,fontFamily:"'Space Mono',monospace",color:has?"var(--success)":"var(--tx3)"}}>{fP(Math.round((b?.total||0)/2))}</div>
+            {has?<Bg color="var(--success)" style={{fontSize:8,marginTop:3}}>Pagado ✓</Bg>:<label style={{display:"inline-flex",cursor:"pointer",marginTop:3,padding:"2px 6px",background:"var(--bg4)",borderRadius:4,fontSize:8,color:"var(--accent)"}}>📷 Subir<input type="file" accept="image/*" onChange={e=>hUp(c.id,tp,e)} style={{display:"none"}}/></label>}
+          </div>))}
+        </div>
+      </div></div>);})}
+    <div className="tb" style={{textAlign:"center"}}><div style={{fontSize:10,color:"var(--tx2)"}}>TOTAL {month} {year}</div><div style={{fontSize:24,fontWeight:900,fontFamily:"'Space Mono',monospace",color:"var(--gold)"}}>{fP(Object.values(billing).reduce((s,b)=>s+b.total,0))}</div></div>
+  </div>);
+}
+
+function TeamPayPg({users,teamPay,sTP,addN}){
+  const[f,sF]=useState({userId:users[0]?.id,amount:"",concept:"",date:td()});const[pImg,sPImg]=useState(null);
+  const add=()=>{if(!f.amount)return;const u=users.find(u2=>u2.id===parseInt(f.userId));sTP(p=>({...p,[f.userId]:[...(p[f.userId]||[]),{id:ni(),amount:parseInt(f.amount),concept:f.concept,date:f.date,img:pImg}]}));addN("💰 Pago: "+fP(parseInt(f.amount))+" para "+u?.name,parseInt(f.userId));sF({...f,amount:"",concept:""});sPImg(null);};
+  const hImg=e=>{const fl=e.target.files[0];if(!fl)return;const r=new FileReader();r.onload=ev=>sPImg(ev.target.result);r.readAsDataURL(fl);};
+  return(<div>
+    <div className="cd" style={{padding:12,marginBottom:12}}>
+      <div style={{fontSize:12,fontWeight:700,marginBottom:8}}>Registrar pago</div>
+      <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:6}}>
+        <select value={f.userId} onChange={e=>sF({...f,userId:parseInt(e.target.value)})} style={{flex:1,fontSize:10,padding:"5px"}}>{users.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select>
+        <input value={f.amount} onChange={e=>sF({...f,amount:e.target.value})} placeholder="Monto" type="number" style={{width:80,fontSize:10,padding:"5px"}}/>
+        <input value={f.concept} onChange={e=>sF({...f,concept:e.target.value})} placeholder="Concepto" style={{flex:1,fontSize:10,padding:"5px"}}/>
+        <input type="date" value={f.date} onChange={e=>sF({...f,date:e.target.value})} style={{width:100,fontSize:10,padding:"5px"}}/>
+      </div>
+      <div style={{display:"flex",gap:4,alignItems:"center"}}><label style={{padding:"3px 8px",background:"var(--bg4)",borderRadius:6,fontSize:9,color:"var(--accent)",cursor:"pointer"}}>📷<input type="file" accept="image/*" onChange={hImg} style={{display:"none"}}/></label>{pImg&&<img src={pImg} style={{width:28,height:28,borderRadius:4,objectFit:"cover"}}/>}<Bt v="go" onClick={add} disabled={!f.amount} style={{padding:"5px 10px",fontSize:10,marginLeft:"auto"}}>Registrar</Bt></div>
+    </div>
+    {users.map(u=>{const up=teamPay[u.id]||[];const tot=up.reduce((s,p)=>s+p.amount,0);return up.length>0?(<div key={u.id} className="cd" style={{marginBottom:8}}><div style={{padding:10}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}><div style={{display:"flex",alignItems:"center",gap:5}}><Av u={u} sz={20}/><b style={{fontSize:12}}>{u.name}</b></div><span style={{fontFamily:"'Space Mono',monospace",color:"var(--success)"}}>{fP(tot)}</span></div>
+      {up.map(p=>(<div key={p.id} style={{display:"flex",alignItems:"center",gap:4,padding:"3px 6px",fontSize:10,borderBottom:"1px solid var(--border)"}}>{p.img&&<img src={p.img} style={{width:24,height:24,borderRadius:4,objectFit:"cover"}}/>}<span style={{flex:1}}>{p.concept||"Pago"}</span><span style={{color:"var(--tx2)",fontSize:9}}>{p.date}</span><span style={{fontFamily:"'Space Mono',monospace",color:"var(--success)"}}>{fP(p.amount)}</span><button onClick={()=>sTP(pr=>({...pr,[u.id]:pr[u.id].filter(x=>x.id!==p.id)}))} style={{background:"none",color:"var(--danger)",fontSize:8,padding:0}}>X</button></div>))}
+    </div></div>):null;})}
+  </div>);
+}
+
+// ═══ FORMS ══════════════════════════════════════════════════════
+function TskForm({cos,users,onSave}){const[f,sF]=useState({title:"",type:"post",company:"",companyId:0,responsable:null,date:"",description:""});return(<div>
+  <Fd label="Titulo"><input value={f.title} onChange={e=>sF({...f,title:e.target.value})} placeholder="Nombre"/></Fd>
+  <Fd label="Tipo"><select value={f.type} onChange={e=>sF({...f,type:e.target.value})}>{Object.entries(TT).map(([k,v])=><option key={k} value={k}>{v.i} {v.l}</option>)}</select></Fd>
+  <Fd label="Empresa"><select value={f.companyId} onChange={e=>{const co=cos.find(c=>c.id===parseInt(e.target.value));sF({...f,companyId:parseInt(e.target.value),company:co?.name||""});}}><option value={0}>--</option>{cos.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></Fd>
+  <Fd label="Responsable"><select value={f.responsable||""} onChange={e=>sF({...f,responsable:parseInt(e.target.value)||null})}><option value="">--</option>{users.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select></Fd>
+  <Fd label="Fecha"><input type="date" value={f.date} onChange={e=>sF({...f,date:e.target.value})}/></Fd>
+  <Bt v="p" disabled={!f.title||!f.companyId} onClick={()=>onSave(f)} style={{width:"100%"}}>Crear</Bt></div>);}
+function CoForm({onSave}){const[n,sN]=useState("");const[p,sP]=useState("society");const cols=["#4ecdc4","#9d6bff","#ff6b6b","#6bcbff","#ffd93d","#ff9ff3"];const[c,sC]=useState(cols[0]);return(<div>
+  <Fd label="Nombre"><input value={n} onChange={e=>sN(e.target.value)} placeholder="Ej: Fauna"/></Fd>
+  <Fd label="Plan"><select value={p} onChange={e=>sP(e.target.value)}>{Object.entries(PLANS).map(([k,v])=><option key={k} value={k}>{v.name} - {fP(v.price)}</option>)}</select></Fd>
+  <Fd label="Color"><div style={{display:"flex",gap:5}}>{cols.map(co=><div key={co} onClick={()=>sC(co)} style={{width:26,height:26,borderRadius:"50%",background:co,cursor:"pointer",border:c===co?"3px solid #fff":"3px solid transparent"}}/>)}</div></Fd>
+  <Bt v="p" disabled={!n.trim()} onClick={()=>onSave({name:n.trim(),plan:p,color:c})} style={{width:"100%"}}>Crear</Bt></div>);}
+function TskDet({t,cu,users,onUp,onVote,onDel,onUns,onSync,hasGcal,onFile}){
+  const[desc,sD]=useState(t.description||"");const[com,sC]=useState("");const fR=useRef(null);
+  const sts=["no_realizado","en_proceso","en_aprobacion","aprobado","publicado"];
+  return(<div style={{display:"flex",flexDirection:"column",gap:10}}>
+    <div style={{display:"flex",gap:4,flexWrap:"wrap",alignItems:"center"}}><Bg color={TT[t.type]?.c}>{TT[t.type]?.i} {TT[t.type]?.l||t.type}</Bg><Bg color={SS[t.state]?.c} bg={SS[t.state]?.b}>{SS[t.state]?.l}</Bg><Bg>{t.company}</Bg>
+      <div style={{marginLeft:"auto",display:"flex",gap:3}}>{t.date&&<Bt v="g" onClick={onUns} style={{fontSize:9,color:"var(--warn)"}}>↩</Bt>}{t.date&&hasGcal&&<Bt v="g" onClick={onSync} style={{fontSize:9,color:"var(--info)"}}>📅</Bt>}<Bt v="g" onClick={onDel} style={{fontSize:9,color:"var(--danger)"}}>🗑</Bt></div></div>
+    <Fd label="Estado"><div style={{display:"flex",gap:2,flexWrap:"wrap"}}>{sts.map(s=><button key={s} onClick={()=>onUp({state:s})} style={{padding:"4px 9px",borderRadius:6,fontSize:9,fontWeight:600,background:t.state===s?SS[s].c+"cc":"var(--bg4)",color:t.state===s?"#fff":"var(--tx2)",fontFamily:"inherit"}}>{SS[s].l}</button>)}</div></Fd>
+    <Fd label="Responsable"><select value={t.responsable||""} onChange={e=>onUp({responsable:parseInt(e.target.value)||null})}><option value="">--</option>{users.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select></Fd>
+    <Fd label="Fecha"><input type="date" value={t.date||""} onChange={e=>onUp({date:e.target.value||null})}/></Fd>
+    <Fd label="Descripcion"><textarea value={desc} onChange={e=>sD(e.target.value)} onBlur={()=>onUp({description:desc})} rows={2} placeholder="..."/></Fd>
+    {(t.state==="en_aprobacion"||t.state==="en_proceso")&&(<div style={{background:"var(--bg3)",borderRadius:8,padding:8}}>
+      <div style={{fontSize:10,fontWeight:600,marginBottom:4}}>📎 Archivos ({t.files?.length||0})</div>
+      {t.files?.map((f,i)=>(<div key={i} style={{marginBottom:3}}>{f.type?.startsWith("image")?<img src={f.data} style={{maxWidth:"100%",maxHeight:80,borderRadius:4}}/>:<a href={f.data} download={f.name} style={{fontSize:10,color:"var(--accent)"}}>{f.name}</a>}</div>))}
+      <input ref={fR} type="file" style={{display:"none"}} onChange={e=>{if(e.target.files[0])onFile(e.target.files[0]);}}/><Bt v="s" onClick={()=>fR.current?.click()} style={{fontSize:9}}>📎 Subir</Bt>
+    </div>)}
+    {t.state==="en_aprobacion"&&(<div style={{background:"var(--bg3)",borderRadius:8,padding:8}}>
+      <div style={{fontSize:10,fontWeight:700,marginBottom:4}}>Votacion</div>
+      {users.map(u=>{const v=t.votes?.[u.id];return(<div key={u.id} style={{display:"flex",alignItems:"center",gap:4,marginBottom:3}}><Av u={u} sz={16}/><span style={{fontSize:9,flex:1}}>{u.name}</span>
+        {v===undefined?((u.id===cu.id||cu.role==="admin")?<div style={{display:"flex",gap:2}}><Bt v="s" onClick={()=>onVote(u.id,true)} style={{padding:"2px 6px",fontSize:8,background:"var(--success)",color:"#fff"}}>✓</Bt><Bt v="s" onClick={()=>onVote(u.id,false)} style={{padding:"2px 6px",fontSize:8,background:"var(--danger)",color:"#fff"}}>✗</Bt></div>:<span style={{fontSize:8,color:"var(--tx3)"}}>...</span>)
+        :<Bg color={v?"var(--success)":"var(--danger)"} style={{fontSize:8}}>{v?"✓":"✗"}</Bg>}</div>);})}
+    </div>)}
+    <div><div style={{fontSize:9,color:"var(--tx2)",fontWeight:600,marginBottom:3}}>COMENTARIOS ({t.comments?.length||0})</div>
+      {(t.comments||[]).map((c,i)=><div key={i} style={{background:"var(--bg3)",padding:"4px 6px",borderRadius:4,marginBottom:2,fontSize:9}}><b style={{color:"var(--accent)"}}>{c.user}:</b> {c.text}</div>)}
+      <div style={{display:"flex",gap:3,marginTop:3}}><input value={com} onChange={e=>sC(e.target.value)} placeholder="..." style={{flex:1,fontSize:9,padding:"4px 6px"}} onKeyDown={e=>{if(e.key==="Enter"&&com.trim()){onUp({comments:[...(t.comments||[]),{user:cu.name,text:com.trim()}]});sC("");}}}/>
+        <Bt v="s" onClick={()=>{if(com.trim()){onUp({comments:[...(t.comments||[]),{user:cu.name,text:com.trim()}]});sC("");}}} style={{fontSize:9,padding:"3px 6px"}}>→</Bt></div>
+    </div>
+  </div>);
+}
+
+function App(){const[u,sU]=useState(null);const[us,sUs]=useState(INIT_USERS);
+  if(!u)return<Login users={us} onLogin={sU}/>;
+  return<Main user={u} users={us} setUsers={sUs} onLogout={()=>sU(null)}/>;
+}
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
